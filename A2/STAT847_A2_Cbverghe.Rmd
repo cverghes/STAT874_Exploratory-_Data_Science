@@ -1,0 +1,179 @@
+---
+title: "STAT 847: Analysis Assignment 2"
+subtitle: "Chris Binoi Verghese       ID: 21092999"
+output:
+  pdf_document:
+    keep_tex: yes
+    number_sections: no
+  html_document:
+    toc: yes
+  word_document: default
+urlcolor: blue
+---
+
+
+```{r, message = FALSE, warning=FALSE}
+#Libraries utilized in the assignment
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(leaps)
+library(factoextra)
+library(car)
+
+```
+
+
+1. (4 points) Using the `randomForest` function in `library(randomForest)`, make five random forests, each one using one of the phenotype variable `Perimeter_Growth` as a response y variable. The forest should use all 10,000 of the gene variables (These are the 9th, ... , 10,008th variables). Give your forest 500 trees, have each tree use 300 gene variables, and set a minimum node size of 1. Sample with replacement. Report the percentage of variance explained by the forest using `print()`.
+
+```{r, cache = TRUE}
+#Reading .csv and preprocessing data into genes and phenotypes
+dat = read.csv("F1-Hybrids_Pheno_10000genes.csv")
+genes = dat[,9:10008]
+pheno = dat[,1:8]
+#Initialization of list of percentage variances
+p_var = c(1,2,3,4,5)
+for (i in 1:5) {
+  #Generation of a Random Forest
+  forest <- randomForest(x=genes, y = pheno$Perimeter_Growth, 
+                         ntree = 500, mtry = 300, node_size = 1, 
+                         replace = TRUE)
+  print(forest)
+  #Save the calculated percentage of variance explained by forest
+  p_var[i] = round(100 * forest$rsq[length(forest$rsq)], digits = 2)
+}
+
+cat("the percentages of variance explained  are:",p_var)
+```
+
+\newpage
+
+
+2. (2 points) Get a `hist()` of the `$importance` values from your random forest model of perimeter growth (not the MPH). Use this to comment on the relative importance of some genes over others in determining perimeter growth. Use 100 bins for the histogram.
+
+```{r}
+#Histogram of importance values of genes from last Random Forest
+hist(x = forest$importance, 
+     main = "Importance values of random forest model",
+     xlab = "Importance Values",
+     breaks = 100,
+     xlim = range(forest$importance),
+     plot = TRUE)
+
+```
+The largest number of variables (close to 8000 out of 10000) have no importance in helping predict Perimenter Growth in the random Forest and almost all the variable are exhausted before reaching an importance value of 1. However there are a few genes that have an extremely high importance value resulting in the histogram's maximum range reaching up to 12. 
+
+Therefore, there are a few genes that have a relatively high importance value in the determination of Perimeter Growth in the random Forest over the 10000 genes provided.
+\newpage
+
+
+3. (0 marks) Use the following code to make a new dataset that only includes perimeter growth and the most important 50 genetic variables from random forest for perimeter growth. `mod2` is the name of the `randomForest()` output in this case.
+
+```{r}
+
+# Set a cutoff of the 50th most important variable
+cutoff = rev(sort(forest$importance))[50]
+
+# Keep only those 50 variables
+idx = which(forest$importance >= cutoff)
+genes_imp = genes[,idx]
+
+dat_imp = cbind(pheno$Perimeter_Growth, genes_imp)
+names(dat_imp)[1] = "Perimeter_Growth"
+
+```
+
+\newpage
+
+
+4. (4 points) Using `rpart`, and this new dataset `dat_imp` (or `genes_imp`) of the 50 most important variables for perimeter growth, create a single regression tree of perimeter growth. Plot the tree with `prp` in the `rpart.plot` package.
+
+```{r}
+#Regression Tree of Perimeter Growth for 50 most important genes 
+fit = rpart(dat_imp$Perimeter_Growth ~ ., data = dat_imp)
+#Plot Regression Tree
+prp(fit)
+```
+\newpage
+
+
+5. (4 marks) Using `regsubsets` in the `leaps` package, and the new dataset `dat_imp` (or `genes_imp`), use best subsets regression with the Adjusted R-squared criterion. Report the variables of the best model, their coefficients, and the adjusted r-squared of the model.
+
+```{r, cache = TRUE, warning=FALSE}
+regsub <- regsubsets(dat_imp$Perimeter_Growth ~ ., data = dat_imp, really.big = TRUE, nvmax = 50, nbest = 1)
+```
+
+```{r}
+#Choose model with highest adjusted r-squared value
+best_model <- which.max(summary(regsub)$adjr2)
+coefficients <- coef(regsub,best_model)
+#Filter out non zero coefficients
+coefficients <- coefficients[coefficients != 0]
+#Getting variables assigned to these coefficients and removing intercept
+variables <- names(coefficients)[ -1, drop = FALSE] 
+#Getting highest r-squared value
+best_r2 <- max(summary(regsub)$adjr2)
+print("Coefficients of the best subset model: ")
+coefficients
+cat("\nVariables of best subset:",variables)
+cat("\n The adjusted r-squared value of the best subset model: ",best_r2)
+
+```
+
+
+\newpage
+
+
+6. (4 marks) Run a PCA on the 50 important variables in `genes_imp`. Report the total (cumulative) variance explained by the first 10 principal components. Plot a scree plot.
+
+```{r}
+#Running a PCA on 50 most important variables
+PCA <- princomp(genes_imp)
+#Calculating the cumulative variance explained by the first 10 PCs
+print(cumsum(PCA$sdev^2 / sum(PCA$sdev^2))[1:10])
+#Plotting them on a screeplot
+fviz_screeplot(PCA, addlabels = TRUE)
+
+```
+\newpage
+
+7. (4 marks) Build a linear model of the response variable `Perimeter_Growth` using the first ten PCA dimensions from the previous question, and nothing else. Report the `summary(lm())`. Comment on the difference between this model's adjusted R-squared and how the adjusted r-squared values for the top 10 PCs and the best subsets model are about the same.
+
+```{r}
+#Create a dataframe to find the linear model from first 10 PCs
+comp_df = data.frame(Perimeter_Growth = dat_imp$Perimeter_Growth, PCA$scores[,1:10])
+#Create a linear model and display summary
+pca_lm = lm(dat_imp$Perimeter_Growth ~., data = comp_df)
+summary(pca_lm)
+
+cat("Adjusted R-squared of linear model using 10 PCA dimension:", summary(pca_lm)$adj.r.squared)
+cat("\nAdjusted R-squared of best subsets regression model:", best_r2)
+```
+
+ Best subset regression aims to maximize the adjusted R-squared value, which represents the proportion of variance in the dependent variable explained by the predictors. Similarly, PCA selects principal components that capture the maximum variance in the data. Thus, both methods strive to optimize the explained variance, resulting in similar adjusted R-squared value. 
+ 
+\newpage
+
+8. (4 marks)  Describe briefly one advantage and one disadvantage of the PCA-based model over the best subsets model. (There are several correct answers, but only the first two will be marked).
+
+One advantage PCA-based models have over best subsets models involve its computational efficiency. Best subset regression involves searching through all possible subsets of predictors, which can be computationally expensive and time consuming, especially for large datasets with many predictors. PCA, on the other hand, involves eigenvalue or singular value decomposition, which is computationally efficient.
+
+One disadvantage on the other hand involves its information loss. PCA aims to capture maximum variance in the data, but this does not mean that it is most relevant information for predicting the target variable. Important predictive information may be lost during the dimensionality reduction, resulting in suboptimal model performance.
+
+\newpage
+
+9. (4 marks) The variance inflation factor of an explanatory variable in a model is a function of how collinear that variable is with the over explanatory variables in the model are. The higher the number, the more collinear and the most the variance estimates of the slopes are being inflated by including that variable. We can find the variable inflation factor with `vif(lm())`, where `vif` is found in the `car` package.
+
+Find the `vif()` of both the PCA-based model and best-subsets model.
+
+Report the VIFs for both models and briefly explain why the PCA-based model has such low inflation factors (1 is the lowest possible).
+
+```{r}
+vif(pca_lm)
+data_subset <- dat_imp[, c("Perimeter_Growth", variables)]
+vif(lm(dat_imp$Perimeter_Growth ~., data = data_subset))
+
+```
+The PCA-based model has lower inflation factors due to PCs being orthogonal in nature due to it aiming to capture the maximum explained variance. As such, it reduces multicollinearity among the predictors, leading to the lowest Variance Inflation Factors (VIFs). .
+
+On the other hand, a linear model created from the variables from the best subset has higher collinearity due making use of highly correlated predicted giving rise to its higher variance inflation factor scores. 
